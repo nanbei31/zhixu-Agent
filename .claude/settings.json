@@ -1,0 +1,76 @@
+{
+  "permissions": {
+    "deny": [
+      "run_shell(git push*)",
+      "run_shell(curl*)",
+      "run_shell(wget*)"
+    ]
+  },
+  "workspacePolicy": {
+    "readablePaths": [
+      "."
+    ],
+    "writablePaths": [
+      "src/",
+      "python/mini_claude/",
+      "examples/ci-fix-python/"
+    ],
+    "denyPaths": [
+      ".git/",
+      ".ssh/",
+      ".venv/",
+      ".env",
+      ".env.*",
+      "**/*.pem",
+      "**/*.key"
+    ],
+    "agentTools": [
+      "read_file",
+      "list_files",
+      "grep_search",
+      "edit_file",
+      "write_file"
+    ],
+    "allowAgentShell": false
+  },
+  "githubAutoFix": {
+    "protectedPaths": [
+      ".github/**",
+      ".claude/**",
+      "python/mini_claude/github/**",
+      "test/**",
+      "tests/**",
+      "**/test/**",
+      "**/tests/**",
+      "test_*.py",
+      "**/test_*.py",
+      "*_test.py",
+      "**/*_test.py",
+      "pyproject.toml",
+      "**/pyproject.toml",
+      "setup.py",
+      "**/setup.py",
+      "setup.cfg",
+      "**/setup.cfg",
+      "tox.ini",
+      "**/tox.ini",
+      "requirements*.txt",
+      "**/requirements*.txt",
+      "package.json",
+      "package-lock.json",
+      "yarn.lock",
+      "pnpm-lock.yaml",
+      "Pipfile*",
+      "**/Pipfile*",
+      "poetry.lock",
+      "**/poetry.lock",
+      "uv.lock",
+      "**/uv.lock"
+    ],
+    "maxPatchBytes": 1000000,
+    "allowNewFiles": true,
+    "allowDeletions": false,
+    "allowSymlinks": false,
+    "allowBinaryFiles": false
+  }
+}

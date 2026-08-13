@@ -1,0 +1,1072 @@
+name: pytest-repair-40
+version: 1
+description: Forty deterministic Python repair tasks with public and hidden pytest checks.
+cases:
+  - id: arithmetic-wrong-operator
+    title: Addition uses subtraction
+    category: arithmetic
+    difficulty: easy
+    files:
+      app.py: |
+        def add(left: int, right: int) -> int:
+            return left - right
+    public_test: |
+      from app import add
+      def test_add_positive():
+          assert add(2, 3) == 5
+    hidden_test: |
+      from app import add
+      def test_add_negative_and_zero():
+          assert add(-2, 2) == 0
+          assert add(0, 0) == 0
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def add(left: int, right: int) -> int:
+            return left + right
+
+  - id: arithmetic-discount-division
+    title: Discount calculation uses integer division
+    category: arithmetic
+    difficulty: easy
+    files:
+      app.py: |
+        def discounted(price: float, percent: int) -> float:
+            return price * (1 - percent // 100)
+    public_test: |
+      from app import discounted
+      def test_twenty_percent_discount():
+          assert discounted(50.0, 20) == 40.0
+    hidden_test: |
+      from app import discounted
+      def test_fractional_result():
+          assert discounted(19.99, 25) == 14.9925
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def discounted(price: float, percent: int) -> float:
+            return price * (1 - percent / 100)
+
+  - id: arithmetic-average-divisor
+    title: Average divides by the wrong count
+    category: arithmetic
+    difficulty: easy
+    files:
+      app.py: |
+        def average(values: list[float]) -> float:
+            return sum(values) / (len(values) - 1)
+    public_test: |
+      from app import average
+      def test_average_three_values():
+          assert average([3, 6, 9]) == 6
+    hidden_test: |
+      from app import average
+      def test_average_single_value():
+          assert average([7]) == 7
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def average(values: list[float]) -> float:
+            return sum(values) / len(values)
+
+  - id: arithmetic-clamp-bounds
+    title: Clamp applies bounds in reverse
+    category: arithmetic
+    difficulty: medium
+    files:
+      app.py: |
+        def clamp(value: int, low: int, high: int) -> int:
+            return min(low, max(high, value))
+    public_test: |
+      from app import clamp
+      def test_clamp_above_range():
+          assert clamp(20, 0, 10) == 10
+    hidden_test: |
+      from app import clamp
+      def test_clamp_all_regions():
+          assert clamp(-2, 0, 10) == 0
+          assert clamp(5, 0, 10) == 5
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def clamp(value: int, low: int, high: int) -> int:
+            return max(low, min(high, value))
+
+  - id: arithmetic-percentage-scale
+    title: Percentage omits scale conversion
+    category: arithmetic
+    difficulty: easy
+    files:
+      app.py: |
+        def percentage(amount: float, rate: float) -> float:
+            return amount * rate
+    public_test: |
+      from app import percentage
+      def test_five_percent():
+          assert percentage(200, 5) == 10
+    hidden_test: |
+      from app import percentage
+      def test_decimal_amount():
+          assert percentage(49.5, 10) == 4.95
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def percentage(amount: float, rate: float) -> float:
+            return amount * rate / 100
+
+  - id: strings-slug-separator
+    title: Slug removes spaces instead of separating words
+    category: strings
+    difficulty: easy
+    files:
+      app.py: |
+        def slugify(value: str) -> str:
+            return value.strip().lower().replace(" ", "")
+    public_test: |
+      from app import slugify
+      def test_slug_words():
+          assert slugify("Hello World") == "hello-world"
+    hidden_test: |
+      from app import slugify
+      def test_slug_trims_edges():
+          assert slugify("  Red Green Blue  ") == "red-green-blue"
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def slugify(value: str) -> str:
+            return "-".join(value.strip().lower().split())
+
+  - id: strings-email-normalization
+    title: Email normalization preserves case
+    category: strings
+    difficulty: easy
+    files:
+      app.py: |
+        def normalize_email(value: str) -> str:
+            return value.strip()
+    public_test: |
+      from app import normalize_email
+      def test_email_case():
+          assert normalize_email(" User@Example.COM ") == "user@example.com"
+    hidden_test: |
+      from app import normalize_email
+      def test_already_normalized():
+          assert normalize_email("a@b.dev") == "a@b.dev"
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def normalize_email(value: str) -> str:
+            return value.strip().lower()
+
+  - id: strings-all-initials
+    title: Initials include only the first word
+    category: strings
+    difficulty: easy
+    files:
+      app.py: |
+        def initials(name: str) -> str:
+            return name.strip()[0].upper()
+    public_test: |
+      from app import initials
+      def test_full_name():
+          assert initials("Ada Lovelace") == "AL"
+    hidden_test: |
+      from app import initials
+      def test_multiple_spaces():
+          assert initials("  grace   brewster murray hopper ") == "GBMH"
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def initials(name: str) -> str:
+            return "".join(part[0].upper() for part in name.split())
+
+  - id: strings-mask-last-four
+    title: Secret masking hides the wrong side
+    category: strings
+    difficulty: easy
+    files:
+      app.py: |
+        def mask_secret(value: str) -> str:
+            return value[:4] + "*" * max(0, len(value) - 4)
+    public_test: |
+      from app import mask_secret
+      def test_mask_card():
+          assert mask_secret("12345678") == "****5678"
+    hidden_test: |
+      from app import mask_secret
+      def test_short_and_long_values():
+          assert mask_secret("1234") == "1234"
+          assert mask_secret("abcdefghij") == "******ghij"
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def mask_secret(value: str) -> str:
+            return "*" * max(0, len(value) - 4) + value[-4:]
+
+  - id: strings-join-display
+    title: Display list uses the wrong delimiter
+    category: strings
+    difficulty: easy
+    files:
+      app.py: |
+        def display_names(names: list[str]) -> str:
+            return "".join(names)
+    public_test: |
+      from app import display_names
+      def test_three_names():
+          assert display_names(["Ana", "Bo", "Cy"]) == "Ana, Bo, Cy"
+    hidden_test: |
+      from app import display_names
+      def test_empty_and_single():
+          assert display_names([]) == ""
+          assert display_names(["Ana"]) == "Ana"
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def display_names(names: list[str]) -> str:
+            return ", ".join(names)
+
+  - id: collections-dedupe-order
+    title: Deduplication destroys insertion order
+    category: collections
+    difficulty: medium
+    files:
+      app.py: |
+        def unique(values: list[int]) -> list[int]:
+            return sorted(set(values))
+    public_test: |
+      from app import unique
+      def test_preserves_first_occurrence():
+          assert unique([3, 1, 3, 2]) == [3, 1, 2]
+    hidden_test: |
+      from app import unique
+      def test_empty_and_repeated():
+          assert unique([]) == []
+          assert unique([2, 2, 1, 2]) == [2, 1]
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def unique(values: list[int]) -> list[int]:
+            return list(dict.fromkeys(values))
+
+  - id: collections-top-n-direction
+    title: Top N returns the smallest values
+    category: collections
+    difficulty: easy
+    files:
+      app.py: |
+        def top_n(values: list[int], count: int) -> list[int]:
+            return sorted(values)[:count]
+    public_test: |
+      from app import top_n
+      def test_top_two():
+          assert top_n([4, 1, 9, 3], 2) == [9, 4]
+    hidden_test: |
+      from app import top_n
+      def test_count_larger_than_input():
+          assert top_n([2, 5], 5) == [5, 2]
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def top_n(values: list[int], count: int) -> list[int]:
+            return sorted(values, reverse=True)[:count]
+
+  - id: collections-merge-precedence
+    title: Defaults overwrite explicit configuration
+    category: collections
+    difficulty: medium
+    files:
+      app.py: |
+        def merge_config(defaults: dict, overrides: dict) -> dict:
+            return {**overrides, **defaults}
+    public_test: |
+      from app import merge_config
+      def test_override_wins():
+          assert merge_config({"port": 80}, {"port": 8080})["port"] == 8080
+    hidden_test: |
+      from app import merge_config
+      def test_keeps_distinct_keys():
+          assert merge_config({"host": "localhost"}, {"debug": True}) == {"host": "localhost", "debug": True}
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def merge_config(defaults: dict, overrides: dict) -> dict:
+            return {**defaults, **overrides}
+
+  - id: collections-frequency-count
+    title: Frequency table loses duplicate counts
+    category: collections
+    difficulty: easy
+    files:
+      app.py: |
+        def frequencies(values: list[str]) -> dict[str, int]:
+            return {value: 1 for value in set(values)}
+    public_test: |
+      from app import frequencies
+      def test_duplicates():
+          assert frequencies(["a", "b", "a"]) == {"a": 2, "b": 1}
+    hidden_test: |
+      from app import frequencies
+      def test_empty_and_many():
+          assert frequencies([]) == {}
+          assert frequencies(["x", "x", "x"]) == {"x": 3}
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def frequencies(values: list[str]) -> dict[str, int]:
+            result: dict[str, int] = {}
+            for value in values:
+                result[value] = result.get(value, 0) + 1
+            return result
+
+  - id: collections-chunk-off-by-one
+    title: Chunking drops the final partial group
+    category: collections
+    difficulty: medium
+    files:
+      app.py: |
+        def chunks(values: list[int], size: int) -> list[list[int]]:
+            return [values[index:index + size] for index in range(0, len(values) - size, size)]
+    public_test: |
+      from app import chunks
+      def test_partial_chunk():
+          assert chunks([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]
+    hidden_test: |
+      from app import chunks
+      def test_exact_and_short():
+          assert chunks([1, 2, 3, 4], 2) == [[1, 2], [3, 4]]
+          assert chunks([1], 3) == [[1]]
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def chunks(values: list[int], size: int) -> list[list[int]]:
+            return [values[index:index + size] for index in range(0, len(values), size)]
+
+  - id: boundary-pagination-offset
+    title: Pagination treats page one as an offset
+    category: boundaries
+    difficulty: easy
+    files:
+      app.py: |
+        def page_slice(values: list[int], page: int, size: int) -> list[int]:
+            start = page * size
+            return values[start:start + size]
+    public_test: |
+      from app import page_slice
+      def test_first_page():
+          assert page_slice(list(range(10)), 1, 3) == [0, 1, 2]
+    hidden_test: |
+      from app import page_slice
+      def test_later_and_partial_pages():
+          assert page_slice(list(range(8)), 2, 3) == [3, 4, 5]
+          assert page_slice(list(range(8)), 3, 3) == [6, 7]
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def page_slice(values: list[int], page: int, size: int) -> list[int]:
+            start = (page - 1) * size
+            return values[start:start + size]
+
+  - id: boundary-adult-threshold
+    title: Adult threshold excludes the exact boundary
+    category: boundaries
+    difficulty: easy
+    files:
+      app.py: |
+        def is_adult(age: int) -> bool:
+            return age > 18
+    public_test: |
+      from app import is_adult
+      def test_eighteen_is_adult():
+          assert is_adult(18)
+    hidden_test: |
+      from app import is_adult
+      def test_around_threshold():
+          assert not is_adult(17)
+          assert is_adult(19)
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def is_adult(age: int) -> bool:
+            return age >= 18
+
+  - id: boundary-zero-division
+    title: Safe division checks the wrong operand
+    category: boundaries
+    difficulty: medium
+    files:
+      app.py: |
+        def safe_divide(numerator: float, denominator: float, default: float = 0) -> float:
+            if numerator == 0:
+                return default
+            return numerator / denominator
+    public_test: |
+      from app import safe_divide
+      def test_zero_denominator():
+          assert safe_divide(10, 0, -1) == -1
+    hidden_test: |
+      from app import safe_divide
+      def test_zero_numerator_and_normal():
+          assert safe_divide(0, 5, -1) == 0
+          assert safe_divide(9, 3, -1) == 3
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def safe_divide(numerator: float, denominator: float, default: float = 0) -> float:
+            if denominator == 0:
+                return default
+            return numerator / denominator
+
+  - id: boundary-inclusive-range
+    title: Inclusive range omits the end value
+    category: boundaries
+    difficulty: easy
+    files:
+      app.py: |
+        def inclusive_range(start: int, end: int) -> list[int]:
+            return list(range(start, end))
+    public_test: |
+      from app import inclusive_range
+      def test_end_is_included():
+          assert inclusive_range(2, 5) == [2, 3, 4, 5]
+    hidden_test: |
+      from app import inclusive_range
+      def test_single_value():
+          assert inclusive_range(3, 3) == [3]
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def inclusive_range(start: int, end: int) -> list[int]:
+            return list(range(start, end + 1))
+
+  - id: boundary-retry-count
+    title: Retry loop performs one attempt too few
+    category: boundaries
+    difficulty: medium
+    files:
+      app.py: |
+        def retry(operation, attempts: int):
+            for _ in range(attempts - 1):
+                try:
+                    return operation()
+                except RuntimeError:
+                    pass
+            raise RuntimeError("operation failed")
+    public_test: |
+      from app import retry
+      def test_succeeds_on_last_attempt():
+          calls = []
+          def operation():
+              calls.append(1)
+              if len(calls) < 3:
+                  raise RuntimeError("again")
+              return "ok"
+          assert retry(operation, 3) == "ok"
+    hidden_test: |
+      import pytest
+      from app import retry
+      def test_uses_exact_attempt_limit():
+          calls = []
+          def operation():
+              calls.append(1)
+              raise RuntimeError("again")
+          with pytest.raises(RuntimeError):
+              retry(operation, 2)
+          assert len(calls) == 2
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def retry(operation, attempts: int):
+            for _ in range(attempts):
+                try:
+                    return operation()
+                except RuntimeError:
+                    pass
+            raise RuntimeError("operation failed")
+
+  - id: datetime-weekend-saturday
+    title: Weekend detection excludes Saturday
+    category: datetime
+    difficulty: easy
+    files:
+      app.py: |
+        from datetime import date
+        def is_weekend(value: date) -> bool:
+            return value.weekday() > 5
+    public_test: |
+      from datetime import date
+      from app import is_weekend
+      def test_saturday():
+          assert is_weekend(date(2026, 8, 15))
+    hidden_test: |
+      from datetime import date
+      from app import is_weekend
+      def test_sunday_and_monday():
+          assert is_weekend(date(2026, 8, 16))
+          assert not is_weekend(date(2026, 8, 17))
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        from datetime import date
+        def is_weekend(value: date) -> bool:
+            return value.weekday() >= 5
+
+  - id: datetime-days-direction
+    title: Day distance returns a negative value
+    category: datetime
+    difficulty: easy
+    files:
+      app.py: |
+        from datetime import date
+        def days_between(left: date, right: date) -> int:
+            return (left - right).days
+    public_test: |
+      from datetime import date
+      from app import days_between
+      def test_forward_distance():
+          assert days_between(date(2026, 1, 1), date(2026, 1, 5)) == 4
+    hidden_test: |
+      from datetime import date
+      from app import days_between
+      def test_order_independent():
+          assert days_between(date(2026, 1, 5), date(2026, 1, 1)) == 4
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        from datetime import date
+        def days_between(left: date, right: date) -> int:
+            return abs((left - right).days)
+
+  - id: datetime-date-format
+    title: Date parser expects day before year
+    category: datetime
+    difficulty: easy
+    files:
+      app.py: |
+        from datetime import datetime
+        def parse_date(value: str):
+            return datetime.strptime(value, "%d-%m-%Y").date()
+    public_test: |
+      from datetime import date
+      from app import parse_date
+      def test_iso_date():
+          assert parse_date("2026-08-12") == date(2026, 8, 12)
+    hidden_test: |
+      from datetime import date
+      from app import parse_date
+      def test_unambiguous_iso_date():
+          assert parse_date("2025-12-31") == date(2025, 12, 31)
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        from datetime import datetime
+        def parse_date(value: str):
+            return datetime.strptime(value, "%Y-%m-%d").date()
+
+  - id: datetime-expiry-boundary
+    title: Expiry check treats the deadline as valid
+    category: datetime
+    difficulty: medium
+    files:
+      app.py: |
+        from datetime import datetime
+        def is_expired(expires_at: datetime, now: datetime) -> bool:
+            return expires_at < now
+    public_test: |
+      from datetime import datetime
+      from app import is_expired
+      def test_exact_deadline_is_expired():
+          now = datetime(2026, 8, 12, 10, 0)
+          assert is_expired(now, now)
+    hidden_test: |
+      from datetime import datetime, timedelta
+      from app import is_expired
+      def test_before_and_after_deadline():
+          now = datetime(2026, 8, 12, 10, 0)
+          assert is_expired(now - timedelta(seconds=1), now)
+          assert not is_expired(now + timedelta(seconds=1), now)
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        from datetime import datetime
+        def is_expired(expires_at: datetime, now: datetime) -> bool:
+            return expires_at <= now
+
+  - id: datetime-month-end
+    title: Month end is hardcoded to day 28
+    category: datetime
+    difficulty: hard
+    files:
+      app.py: |
+        from datetime import date
+        def month_end(value: date) -> date:
+            return value.replace(day=28)
+    public_test: |
+      from datetime import date
+      from app import month_end
+      def test_january_end():
+          assert month_end(date(2026, 1, 10)) == date(2026, 1, 31)
+    hidden_test: |
+      from datetime import date
+      from app import month_end
+      def test_leap_february_and_april():
+          assert month_end(date(2024, 2, 1)) == date(2024, 2, 29)
+          assert month_end(date(2026, 4, 3)) == date(2026, 4, 30)
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        import calendar
+        from datetime import date
+        def month_end(value: date) -> date:
+            return value.replace(day=calendar.monthrange(value.year, value.month)[1])
+
+  - id: multifile-pricing-factor
+    title: Pricing service applies the raw percentage
+    category: multifile
+    difficulty: medium
+    files:
+      rates.py: |
+        def as_factor(percent: float) -> float:
+            return percent / 100
+      service.py: |
+        from rates import as_factor
+        def total(price: float, tax_percent: float) -> float:
+            return price + price * tax_percent
+    public_test: |
+      from service import total
+      def test_tax_total():
+          assert total(100, 8) == 108
+    hidden_test: |
+      from service import total
+      def test_fractional_price():
+          assert total(19.5, 10) == 21.45
+    allowed_changes: [service.py]
+    solution:
+      service.py: |
+        from rates import as_factor
+        def total(price: float, tax_percent: float) -> float:
+            return price + price * as_factor(tax_percent)
+
+  - id: multifile-order-subtotal
+    title: Order service ignores item quantities
+    category: multifile
+    difficulty: medium
+    files:
+      models.py: |
+        from dataclasses import dataclass
+        @dataclass
+        class Item:
+            price: float
+            quantity: int
+      service.py: |
+        from models import Item
+        def subtotal(items: list[Item]) -> float:
+            return sum(item.price for item in items)
+    public_test: |
+      from models import Item
+      from service import subtotal
+      def test_quantities():
+          assert subtotal([Item(5, 3), Item(2, 1)]) == 17
+    hidden_test: |
+      from models import Item
+      from service import subtotal
+      def test_empty_and_fractional():
+          assert subtotal([]) == 0
+          assert subtotal([Item(1.5, 2)]) == 3
+    allowed_changes: [service.py]
+    solution:
+      service.py: |
+        from models import Item
+        def subtotal(items: list[Item]) -> float:
+            return sum(item.price * item.quantity for item in items)
+
+  - id: multifile-inventory-reserve
+    title: Inventory reservation increases stock
+    category: multifile
+    difficulty: medium
+    files:
+      models.py: |
+        from dataclasses import dataclass
+        @dataclass
+        class Stock:
+            available: int
+      service.py: |
+        from models import Stock
+        def reserve(stock: Stock, quantity: int) -> None:
+            stock.available += quantity
+    public_test: |
+      from models import Stock
+      from service import reserve
+      def test_reserve_reduces_stock():
+          stock = Stock(10)
+          reserve(stock, 3)
+          assert stock.available == 7
+    hidden_test: |
+      from models import Stock
+      from service import reserve
+      def test_multiple_reservations():
+          stock = Stock(9)
+          reserve(stock, 2)
+          reserve(stock, 4)
+          assert stock.available == 3
+    allowed_changes: [service.py]
+    solution:
+      service.py: |
+        from models import Stock
+        def reserve(stock: Stock, quantity: int) -> None:
+            stock.available -= quantity
+
+  - id: multifile-user-display
+    title: User display reverses name order
+    category: multifile
+    difficulty: easy
+    files:
+      models.py: |
+        from dataclasses import dataclass
+        @dataclass
+        class User:
+            first_name: str
+            last_name: str
+      service.py: |
+        from models import User
+        def display_name(user: User) -> str:
+            return f"{user.last_name} {user.first_name}"
+    public_test: |
+      from models import User
+      from service import display_name
+      def test_display_name():
+          assert display_name(User("Ada", "Lovelace")) == "Ada Lovelace"
+    hidden_test: |
+      from models import User
+      from service import display_name
+      def test_unicode_name():
+          assert display_name(User("小明", "王")) == "小明 王"
+    allowed_changes: [service.py]
+    solution:
+      service.py: |
+        from models import User
+        def display_name(user: User) -> str:
+            return f"{user.first_name} {user.last_name}"
+
+  - id: multifile-shipping-threshold
+    title: Free shipping excludes the exact threshold
+    category: multifile
+    difficulty: medium
+    files:
+      config.py: |
+        FREE_SHIPPING_MINIMUM = 50.0
+      service.py: |
+        from config import FREE_SHIPPING_MINIMUM
+        def shipping_cost(total: float) -> float:
+            return 0.0 if total > FREE_SHIPPING_MINIMUM else 5.0
+    public_test: |
+      from service import shipping_cost
+      def test_threshold():
+          assert shipping_cost(50.0) == 0.0
+    hidden_test: |
+      from service import shipping_cost
+      def test_around_threshold():
+          assert shipping_cost(49.99) == 5.0
+          assert shipping_cost(80.0) == 0.0
+    allowed_changes: [service.py]
+    solution:
+      service.py: |
+        from config import FREE_SHIPPING_MINIMUM
+        def shipping_cost(total: float) -> float:
+            return 0.0 if total >= FREE_SHIPPING_MINIMUM else 5.0
+
+  - id: exceptions-parse-int
+    title: Invalid integer silently returns zero
+    category: exceptions
+    difficulty: medium
+    files:
+      app.py: |
+        def parse_int(value: str) -> int:
+            try:
+                return int(value)
+            except ValueError:
+                return 0
+    public_test: |
+      import pytest
+      from app import parse_int
+      def test_invalid_integer_raises():
+          with pytest.raises(ValueError):
+              parse_int("not-a-number")
+    hidden_test: |
+      from app import parse_int
+      def test_valid_negative_integer():
+          assert parse_int("-12") == -12
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def parse_int(value: str) -> int:
+            return int(value)
+
+  - id: exceptions-lookup-default
+    title: Lookup catches the wrong exception
+    category: exceptions
+    difficulty: medium
+    files:
+      app.py: |
+        def lookup(mapping: dict, key: str, default=None):
+            try:
+                return mapping[key]
+            except IndexError:
+                return default
+    public_test: |
+      from app import lookup
+      def test_missing_key_returns_default():
+          assert lookup({"a": 1}, "b", 9) == 9
+    hidden_test: |
+      from app import lookup
+      def test_present_falsey_value():
+          assert lookup({"a": 0}, "a", 9) == 0
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def lookup(mapping: dict, key: str, default=None):
+            try:
+                return mapping[key]
+            except KeyError:
+                return default
+
+  - id: exceptions-validation-type
+    title: Validation raises an unrelated exception type
+    category: exceptions
+    difficulty: easy
+    files:
+      app.py: |
+        def require_positive(value: int) -> int:
+            if value <= 0:
+                raise RuntimeError("must be positive")
+            return value
+    public_test: |
+      import pytest
+      from app import require_positive
+      def test_invalid_value_error():
+          with pytest.raises(ValueError, match="must be positive"):
+              require_positive(0)
+    hidden_test: |
+      from app import require_positive
+      def test_positive_value_passes():
+          assert require_positive(3) == 3
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def require_positive(value: int) -> int:
+            if value <= 0:
+                raise ValueError("must be positive")
+            return value
+
+  - id: exceptions-withdraw-overdraft
+    title: Withdrawal permits overdraft
+    category: exceptions
+    difficulty: hard
+    files:
+      app.py: |
+        def withdraw(balance: float, amount: float) -> float:
+            if amount < balance:
+                raise ValueError("insufficient funds")
+            return balance - amount
+    public_test: |
+      import pytest
+      from app import withdraw
+      def test_overdraft_rejected():
+          with pytest.raises(ValueError, match="insufficient funds"):
+              withdraw(10, 11)
+    hidden_test: |
+      from app import withdraw
+      def test_valid_and_exact_withdrawal():
+          assert withdraw(10, 3) == 7
+          assert withdraw(10, 10) == 0
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def withdraw(balance: float, amount: float) -> float:
+            if amount > balance:
+                raise ValueError("insufficient funds")
+            return balance - amount
+
+  - id: exceptions-decode-strict
+    title: Byte decoding silently discards invalid data
+    category: exceptions
+    difficulty: medium
+    files:
+      app.py: |
+        def decode_utf8(value: bytes) -> str:
+            return value.decode("utf-8", errors="ignore")
+    public_test: |
+      import pytest
+      from app import decode_utf8
+      def test_invalid_utf8_raises():
+          with pytest.raises(UnicodeDecodeError):
+              decode_utf8(b"hello\xff")
+    hidden_test: |
+      from app import decode_utf8
+      def test_valid_unicode():
+          assert decode_utf8("你好".encode()) == "你好"
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def decode_utf8(value: bytes) -> str:
+            return value.decode("utf-8")
+
+  - id: async-missing-await
+    title: Async wrapper returns a coroutine
+    category: async-resources
+    difficulty: medium
+    files:
+      app.py: |
+        async def fetch_value() -> int:
+            return 42
+        async def load_value() -> int:
+            return fetch_value()
+    public_test: |
+      import asyncio
+      from app import load_value
+      def test_loaded_value():
+          assert asyncio.run(load_value()) == 42
+    hidden_test: |
+      import asyncio
+      from app import load_value
+      def test_result_is_integer():
+          assert isinstance(asyncio.run(load_value()), int)
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        async def fetch_value() -> int:
+            return 42
+        async def load_value() -> int:
+            return await fetch_value()
+
+  - id: async-gather-results
+    title: Concurrent result collection returns awaitables
+    category: async-resources
+    difficulty: hard
+    files:
+      app.py: |
+        async def double(value: int) -> int:
+            return value * 2
+        async def double_all(values: list[int]):
+            return [double(value) for value in values]
+    public_test: |
+      import asyncio
+      from app import double_all
+      def test_double_all():
+          assert asyncio.run(double_all([1, 2, 3])) == [2, 4, 6]
+    hidden_test: |
+      import asyncio
+      from app import double_all
+      def test_empty_and_negative():
+          assert asyncio.run(double_all([])) == []
+          assert asyncio.run(double_all([-2])) == [-4]
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        import asyncio
+        async def double(value: int) -> int:
+            return value * 2
+        async def double_all(values: list[int]):
+            return list(await asyncio.gather(*(double(value) for value in values)))
+
+  - id: resource-context-close
+    title: Context manager leaves resource open
+    category: async-resources
+    difficulty: medium
+    files:
+      app.py: |
+        class Resource:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+    public_test: |
+      from app import Resource
+      def test_context_closes_resource():
+          resource = Resource()
+          with resource:
+              pass
+          assert resource.closed
+    hidden_test: |
+      import pytest
+      from app import Resource
+      def test_closes_after_exception():
+          resource = Resource()
+          with pytest.raises(RuntimeError):
+              with resource:
+                  raise RuntimeError("boom")
+          assert resource.closed
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        class Resource:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, traceback):
+                self.close()
+                return False
+
+  - id: resource-generator-all
+    title: Generator stops after its first item
+    category: async-resources
+    difficulty: easy
+    files:
+      app.py: |
+        def non_empty(values: list[str]):
+            for value in values:
+                if value:
+                    yield value
+                    return
+    public_test: |
+      from app import non_empty
+      def test_all_non_empty_values():
+          assert list(non_empty(["a", "", "b"])) == ["a", "b"]
+    hidden_test: |
+      from app import non_empty
+      def test_empty_and_leading_empty():
+          assert list(non_empty([])) == []
+          assert list(non_empty(["", "x", "y"])) == ["x", "y"]
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def non_empty(values: list[str]):
+            for value in values:
+                if value:
+                    yield value
+
+  - id: resource-mutable-default
+    title: Mutable default leaks state between calls
+    category: async-resources
+    difficulty: hard
+    files:
+      app.py: |
+        def collect(value: int, values: list[int] = []) -> list[int]:
+            values.append(value)
+            return values
+    public_test: |
+      from app import collect
+      def test_calls_are_independent():
+          assert collect(1) == [1]
+          assert collect(2) == [2]
+    hidden_test: |
+      from app import collect
+      def test_explicit_list_is_reused():
+          target = [9]
+          assert collect(3, target) == [9, 3]
+          assert target == [9, 3]
+    allowed_changes: [app.py]
+    solution:
+      app.py: |
+        def collect(value: int, values: list[int] | None = None) -> list[int]:
+            if values is None:
+                values = []
+            values.append(value)
+            return values

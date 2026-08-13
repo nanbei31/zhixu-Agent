@@ -1,0 +1,18 @@
+node_modules/
+dist/
+dist-test/
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+*.egg-info/
+build/
+steps/dist/
+
+# mini-claude demo artifacts (sessions/memory/skills the steps demos create)
+.mini-session.json
+.mini-memory/
+.mini-skills/
+.mini-mcp.json
+ci-report.json
+.autoci/
