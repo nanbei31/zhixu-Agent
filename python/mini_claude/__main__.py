@@ -11,12 +11,18 @@ from pathlib import Path
 
 from .agent import Agent
 from .benchmark import load_suite, run_benchmark, validate_suite
+from .bugsinpy import load_catalog as load_bugsinpy_catalog
+from .bugsinpy import prepare_case as prepare_bugsinpy_case
+from .bugsinpy import run_case as run_bugsinpy_case
 from .ci import CiFixConfig, run_ci_fix_workflow
 from .ci.report import write_json_report
 from .ci.storage import get_data_root, list_recent_runs, usage_summary
 from .ui import print_welcome, print_user_prompt, print_error, print_info, print_plan_for_approval, print_plan_approval_options
 from .session import load_session, get_latest_session_id
 from .memory import list_memories
+from .pybughive import load_catalog as load_pybughive_catalog
+from .pybughive import prepare_case as prepare_pybughive_case
+from .pybughive import run_case as run_pybughive_case
 from .skills import discover_skills, get_skill_by_name
 from .tools import tool_definitions
 from .workspace_policy import WorkspacePolicy
@@ -96,6 +102,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--benchmark-repetitions", type=int, default=1, help="Repeat each benchmark case N times")
     parser.add_argument("--benchmark-output", help="Directory for benchmark reports and case artifacts")
     parser.add_argument("--benchmark-validate", action="store_true", help="Validate benchmark fixtures without a model")
+    parser.add_argument("--pybughive", action="store_true", help="Run one real-world PyBugHive repair case")
+    parser.add_argument("--pybughive-dataset", help="Path to pybughive_current.json")
+    parser.add_argument("--pybughive-case", help="Case ID such as black-2254")
+    parser.add_argument("--pybughive-workspaces", help="Directory for prepared project checkouts")
+    parser.add_argument("--pybughive-test-command", help="Override the dataset test command")
+    parser.add_argument("--pybughive-output", help="Directory for PyBugHive run artifacts")
+    parser.add_argument("--pybughive-list", action="store_true", help="List available cases without calling a model")
+    parser.add_argument("--pybughive-prepare-only", action="store_true", help="Prepare the buggy checkout without running tests or a model")
+    parser.add_argument("--bugsinpy", action="store_true", help="Run one real-world BugsInPy repair case")
+    parser.add_argument("--bugsinpy-root", help="Path to the cloned BugsInPy repository")
+    parser.add_argument("--bugsinpy-case", help="Case ID such as black-1")
+    parser.add_argument("--bugsinpy-workspaces", help="Directory for prepared BugsInPy checkouts")
+    parser.add_argument(
+        "--bugsinpy-localization",
+        choices=("end-to-end", "oracle"),
+        default="end-to-end",
+        help="Fault localization mode (default: end-to-end)",
+    )
+    parser.add_argument("--bugsinpy-test-command", help="Override the triggering test command")
+    parser.add_argument("--bugsinpy-full-test-command", help="Optional full regression command")
+    parser.add_argument("--bugsinpy-output", help="Directory for BugsInPy run artifacts")
+    parser.add_argument("--bugsinpy-list", action="store_true", help="List available BugsInPy cases")
+    parser.add_argument("--bugsinpy-prepare-only", action="store_true", help="Prepare a BugsInPy checkout without a model")
     parser.add_argument(
         "--test-command",
         default="python -m pytest -q",
@@ -149,12 +178,28 @@ def parse_args() -> argparse.Namespace:
     parser.set_defaults(isolate=True)
     parser.add_argument("--help", "-h", action="store_true", help="Show help")
     args = parser.parse_args()
-    if args.fix_ci and args.benchmark:
-        parser.error("--fix-ci cannot be combined with --benchmark")
+    if sum(bool(value) for value in (
+        args.fix_ci, args.benchmark, args.pybughive, args.bugsinpy,
+    )) > 1:
+        parser.error(
+            "--fix-ci, --benchmark, --pybughive, and --bugsinpy are mutually exclusive"
+        )
     if args.fix_ci and args.prompt:
         parser.error("--fix-ci does not accept a positional prompt")
     if args.benchmark and args.prompt:
         parser.error("--benchmark does not accept a positional prompt")
+    if args.pybughive and args.prompt:
+        parser.error("--pybughive does not accept a positional prompt")
+    if args.pybughive and args.plan:
+        parser.error("--pybughive cannot be combined with --plan")
+    if args.pybughive and args.resume:
+        parser.error("--pybughive cannot be combined with --resume")
+    if args.bugsinpy and args.prompt:
+        parser.error("--bugsinpy does not accept a positional prompt")
+    if args.bugsinpy and args.plan:
+        parser.error("--bugsinpy cannot be combined with --plan")
+    if args.bugsinpy and args.resume:
+        parser.error("--bugsinpy cannot be combined with --resume")
     if args.fix_ci and args.plan:
         parser.error("--fix-ci cannot be combined with --plan")
     if args.fix_ci and args.resume:
@@ -190,6 +235,41 @@ def parse_args() -> argparse.Namespace:
         parser.error("--benchmark-limit must be at least 1")
     if args.benchmark_repetitions < 1:
         parser.error("--benchmark-repetitions must be at least 1")
+    pybughive_options = (
+        args.pybughive_dataset
+        or args.pybughive_case
+        or args.pybughive_workspaces
+        or args.pybughive_test_command
+        or args.pybughive_output
+        or args.pybughive_list
+        or args.pybughive_prepare_only
+    )
+    if pybughive_options and not args.pybughive:
+        parser.error("PyBugHive options require --pybughive")
+    if args.pybughive and not args.pybughive_dataset:
+        parser.error("--pybughive requires --pybughive-dataset")
+    if args.pybughive and not args.pybughive_list and not args.pybughive_case:
+        parser.error("--pybughive requires --pybughive-case unless --pybughive-list is used")
+    if args.pybughive and not args.pybughive_list and not args.pybughive_workspaces:
+        parser.error("--pybughive requires --pybughive-workspaces")
+    bugsinpy_options = (
+        args.bugsinpy_root
+        or args.bugsinpy_case
+        or args.bugsinpy_workspaces
+        or args.bugsinpy_test_command
+        or args.bugsinpy_full_test_command
+        or args.bugsinpy_output
+        or args.bugsinpy_list
+        or args.bugsinpy_prepare_only
+    )
+    if bugsinpy_options and not args.bugsinpy:
+        parser.error("BugsInPy options require --bugsinpy")
+    if args.bugsinpy and not args.bugsinpy_root:
+        parser.error("--bugsinpy requires --bugsinpy-root")
+    if args.bugsinpy and not args.bugsinpy_list and not args.bugsinpy_case:
+        parser.error("--bugsinpy requires --bugsinpy-case unless --bugsinpy-list is used")
+    if args.bugsinpy and not args.bugsinpy_list and not args.bugsinpy_workspaces:
+        parser.error("--bugsinpy requires --bugsinpy-workspaces")
     return args
 
 
@@ -204,7 +284,7 @@ def _resolve_permission_mode(args: argparse.Namespace) -> str:
         return "dontAsk"
     if args.auto:
         return "auto"
-    if args.fix_ci or args.benchmark:
+    if args.fix_ci or args.benchmark or args.pybughive or args.bugsinpy:
         return "acceptEdits"
     return "default"
 
@@ -410,6 +490,35 @@ Options:
   --benchmark-output PATH
                        Write benchmark reports and case artifacts under PATH
   --benchmark-validate Validate all fixtures without calling a model
+  --pybughive          Run one real-world PyBugHive repair case
+  --pybughive-dataset PATH
+                       Path to PyBugHive's pybughive_current.json
+  --pybughive-case ID  Select a case such as black-2254
+  --pybughive-workspaces PATH
+                       Store prepared project checkouts under PATH
+  --pybughive-test-command CMD
+                       Override the test command from the dataset
+  --pybughive-output PATH
+                       Write PyBugHive run artifacts under PATH
+  --pybughive-list     List cases without cloning or calling a model
+  --pybughive-prepare-only
+                       Clone and prepare the buggy revision, then stop
+  --bugsinpy           Run one real-world BugsInPy repair case
+  --bugsinpy-root PATH Path to the cloned BugsInPy repository
+  --bugsinpy-case ID   Select a case such as black-1
+  --bugsinpy-workspaces PATH
+                       Store prepared BugsInPy checkouts under PATH
+  --bugsinpy-localization MODE
+                       end-to-end (default) or oracle fault localization
+  --bugsinpy-test-command CMD
+                       Override the triggering test command
+  --bugsinpy-full-test-command CMD
+                       Optionally require a full regression command
+  --bugsinpy-output PATH
+                       Write BugsInPy run artifacts under PATH
+  --bugsinpy-list      List cases without cloning or calling a model
+  --bugsinpy-prepare-only
+                       Clone and prepare the buggy revision, then stop
   --test-command CMD   Test command for --fix-ci (default: python -m pytest -q)
   --max-fix-attempts N Maximum repair attempts (default: 2)
   --repair-skill NAME  Skill used for each repair attempt (default: pytest-repair)
@@ -502,6 +611,76 @@ Examples:
             print_error(str(e))
             sys.exit(2)
 
+    if args.pybughive:
+        try:
+            catalog = load_pybughive_catalog(Path(args.pybughive_dataset))
+            if args.pybughive_list:
+                print(f"PyBugHive dataset: {catalog.source}")
+                print(f"Cases: {len(catalog.cases)}")
+                for case in catalog.cases:
+                    print(f"  {case.id:24} {case.title}")
+                sys.exit(0)
+            selected_pybughive_case = catalog.get(args.pybughive_case)
+            prepared_pybughive_case = prepare_pybughive_case(
+                selected_pybughive_case,
+                Path(args.pybughive_workspaces),
+                test_command=args.pybughive_test_command,
+            )
+            if args.pybughive_prepare_only:
+                print(f"[PyBugHive] Prepared: {prepared_pybughive_case.project_root}")
+                print(f"[PyBugHive] Case: {selected_pybughive_case.id} - {selected_pybughive_case.title}")
+                print(f"[PyBugHive] Test command: {prepared_pybughive_case.test_command}")
+                print("[PyBugHive] Original install steps:")
+                for step in selected_pybughive_case.install_steps:
+                    print(f"  {step}")
+                print("Install compatible dependencies in your Conda environment, then rerun without --pybughive-prepare-only.")
+                sys.exit(0)
+        except Exception as e:
+            print(f"PyBugHive preparation error: {e}", file=sys.stderr)
+            sys.exit(2)
+
+    if args.bugsinpy:
+        try:
+            bugsinpy_catalog = load_bugsinpy_catalog(Path(args.bugsinpy_root))
+            if args.bugsinpy_list:
+                print(f"BugsInPy dataset: {bugsinpy_catalog.source}")
+                print(f"Cases: {len(bugsinpy_catalog.cases)}")
+                for case in bugsinpy_catalog.cases:
+                    print(
+                        f"  {case.id:24} Python {case.python_version or '?':8} "
+                        f"{'; '.join(case.test_files)}"
+                    )
+                sys.exit(0)
+            selected_bugsinpy_case = bugsinpy_catalog.get(args.bugsinpy_case)
+            prepared_bugsinpy_case = prepare_bugsinpy_case(
+                selected_bugsinpy_case,
+                Path(args.bugsinpy_workspaces),
+                localization_mode=args.bugsinpy_localization,
+                test_command=args.bugsinpy_test_command,
+                full_test_command=args.bugsinpy_full_test_command,
+            )
+            if args.bugsinpy_prepare_only:
+                print(f"[BugsInPy] Prepared: {prepared_bugsinpy_case.project_root}")
+                print(
+                    f"[BugsInPy] Case: {selected_bugsinpy_case.id} - "
+                    f"{selected_bugsinpy_case.title}"
+                )
+                print(f"[BugsInPy] Python: {selected_bugsinpy_case.python_version or 'unknown'}")
+                print(f"[BugsInPy] Localization: {prepared_bugsinpy_case.localization_mode}")
+                print(f"[BugsInPy] Test command: {prepared_bugsinpy_case.test_command}")
+                print("[BugsInPy] Dependency metadata:")
+                print(f"  {prepared_bugsinpy_case.project_root / '.bugsinpy' / 'requirements.txt'}")
+                if selected_bugsinpy_case.setup_script:
+                    print(f"  {prepared_bugsinpy_case.project_root / '.bugsinpy' / 'setup.sh'}")
+                print(
+                    "Create a compatible external environment, install dependencies, "
+                    "then rerun without --bugsinpy-prepare-only."
+                )
+                sys.exit(0)
+        except Exception as e:
+            print(f"BugsInPy preparation error: {e}", file=sys.stderr)
+            sys.exit(2)
+
     if not resolved_api_key:
         print_error(
             "API key is required.\n"
@@ -566,6 +745,91 @@ Examples:
             sys.exit(asyncio.run(_fix_ci()))
         except Exception as e:
             print(f"AutoCI-Fix error: {e}", file=sys.stderr)
+            sys.exit(2)
+
+    if args.pybughive:
+        def _create_pybughive_agent(workspace_policy):
+            return Agent(
+                permission_mode="acceptEdits",
+                model=model,
+                thinking=args.thinking,
+                max_cost_usd=args.max_cost,
+                max_turns=args.max_turns,
+                api_base=resolved_api_base if resolved_use_openai else None,
+                anthropic_base_url=resolved_api_base if not resolved_use_openai else None,
+                api_key=resolved_api_key,
+                custom_tools=_ci_tool_definitions(workspace_policy),
+                workspace_policy=workspace_policy,
+                enable_mcp=False,
+            )
+
+        async def _pybughive() -> int:
+            print(
+                f"[PyBugHive] Running {prepared_pybughive_case.case.id}: "
+                f"{prepared_pybughive_case.test_command}",
+                flush=True,
+            )
+            result = await run_pybughive_case(
+                prepared_pybughive_case,
+                agent_factory=_create_pybughive_agent,
+                max_attempts=args.max_fix_attempts,
+                timeout_seconds=args.ci_timeout,
+                artifacts_dir=(Path(args.pybughive_output).resolve() if args.pybughive_output else None),
+            )
+            print(result.render_text())
+            if result.artifact_dir:
+                print(f"[PyBugHive] Run artifacts: {result.artifact_dir}")
+            return 0 if result.passed else 1
+
+        try:
+            sys.exit(asyncio.run(_pybughive()))
+        except Exception as e:
+            print(f"PyBugHive error: {e}", file=sys.stderr)
+            sys.exit(2)
+
+    if args.bugsinpy:
+        def _create_bugsinpy_agent(workspace_policy):
+            return Agent(
+                permission_mode="acceptEdits",
+                model=model,
+                thinking=args.thinking,
+                max_cost_usd=args.max_cost,
+                max_turns=args.max_turns,
+                api_base=resolved_api_base if resolved_use_openai else None,
+                anthropic_base_url=resolved_api_base if not resolved_use_openai else None,
+                api_key=resolved_api_key,
+                custom_tools=_ci_tool_definitions(workspace_policy),
+                workspace_policy=workspace_policy,
+                enable_mcp=False,
+            )
+
+        async def _bugsinpy() -> int:
+            print(
+                f"[BugsInPy] Running {prepared_bugsinpy_case.case.id} "
+                f"({prepared_bugsinpy_case.localization_mode}): "
+                f"{prepared_bugsinpy_case.test_command}",
+                flush=True,
+            )
+            result = await run_bugsinpy_case(
+                prepared_bugsinpy_case,
+                agent_factory=_create_bugsinpy_agent,
+                max_attempts=args.max_fix_attempts,
+                timeout_seconds=args.ci_timeout,
+                artifacts_dir=(
+                    Path(args.bugsinpy_output).resolve()
+                    if args.bugsinpy_output
+                    else None
+                ),
+            )
+            print(result.render_text())
+            if result.artifact_dir:
+                print(f"[BugsInPy] Run artifacts: {result.artifact_dir}")
+            return 0 if result.passed else 1
+
+        try:
+            sys.exit(asyncio.run(_bugsinpy()))
+        except Exception as e:
+            print(f"BugsInPy error: {e}", file=sys.stderr)
             sys.exit(2)
 
     if args.benchmark:

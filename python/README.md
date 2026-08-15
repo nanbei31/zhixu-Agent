@@ -124,6 +124,42 @@ policy compliance, Token, estimated cost, and duration. See
 [`BENCHMARK.md`](./BENCHMARK.md) for case categories, command options, metric
 definitions, and experiment guidance.
 
+### PyBugHive real-world benchmark adapter
+
+The optional PyBugHive adapter reads the downloaded offline JSON directly, so
+it does not require MongoDB or Docker. It currently runs one case at a time.
+Each workspace is cloned at the parent of the official fix commit, then the
+official regression-test files are restored from the fix commit. WorkspacePolicy
+allows edits only to production files changed by the official repair.
+
+On Windows with the `agent` Conda environment, first list the 149 cases:
+
+```powershell
+conda activate agent
+mini-claude-py --pybughive --pybughive-dataset D:\Learning-AI\benchmarks\pybughive\dataset\pybughive_current.json --pybughive-list
+```
+
+Prepare one checkout without installing anything or calling a model:
+
+```powershell
+mini-claude-py --pybughive --pybughive-dataset D:\Learning-AI\benchmarks\pybughive\dataset\pybughive_current.json --pybughive-case black-2254 --pybughive-workspaces D:\Learning-AI\benchmarks\pybughive-workspaces --pybughive-prepare-only
+```
+
+The command prints the original historical installation steps. Install
+compatible dependencies deliberately in Conda, then verify the printed test
+command fails in the prepared checkout. Run the repair through the `.env` file:
+
+```powershell
+dotenv -f D:\Learning-AI\claude-code-from-scratch-main\python\.env run -- mini-claude-py --pybughive --pybughive-dataset D:\Learning-AI\benchmarks\pybughive\dataset\pybughive_current.json --pybughive-case black-2254 --pybughive-workspaces D:\Learning-AI\benchmarks\pybughive-workspaces --pybughive-output D:\Learning-AI\benchmark-results\pybughive-black-2254
+```
+
+Use `--pybughive-test-command "python -m pytest ..."` when a historical command
+needs a Windows-specific override. A PASS means the regression failed before
+repair, passed afterwards, and the Agent changed only allowed production files.
+Unlike the built-in 40-case suite, PyBugHive does not provide separate hidden
+tests, so this score should be reported as regression-test success rather than
+semantic equivalence to the official patch.
+
 ### GitHub Actions Draft PR repair
 
 `.github/workflows/autoci-repair.yml` provides a manual, three-job repair flow.
@@ -248,3 +284,12 @@ Agent can invoke another Skill on later input without leaking the old scope.
 - `anthropic` — Anthropic SDK（流式）
 - `openai` — OpenAI SDK（兼容后端）
 - `rich` — 终端彩色输出
+
+## BugsInPy 真实故障评测
+
+Python 版本支持直接读取 BugsInPy 官方本地元数据，在无 MongoDB、无强制
+Docker 的情况下准备单个真实项目故障，并通过 AutoCI-Fix、Git Worktree、
+WorkspacePolicy 和独立补丁复验进行评分。支持不泄漏官方目标文件的
+`end-to-end` 模式，以及单独统计的 `oracle` 定位模式。
+
+完整操作与评分标准见 [`BUGSINPY.md`](./BUGSINPY.md)。

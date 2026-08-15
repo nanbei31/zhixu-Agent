@@ -190,7 +190,8 @@ class TestCiFixRunner(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temp:
             command = (
                 f'"{sys.executable}" -c "import os; '
-                'print(os.environ.get(\'ANTHROPIC_API_KEY\', \'missing\'))"'
+                'print(os.environ.get(\'ANTHROPIC_API_KEY\', \'missing\')); '
+                'print(os.environ.get(\'PYTHONDONTWRITEBYTECODE\', \'missing\'))"'
             )
             previous = os.environ.get("ANTHROPIC_API_KEY")
             os.environ["ANTHROPIC_API_KEY"] = "must-not-leak"
@@ -203,7 +204,7 @@ class TestCiFixRunner(unittest.IsolatedAsyncioTestCase):
                     os.environ["ANTHROPIC_API_KEY"] = previous
 
         self.assertTrue(result.succeeded, result.combined_output)
-        self.assertEqual(result.stdout.strip(), "missing")
+        self.assertEqual(result.stdout.splitlines(), ["missing", "1"])
 
 
 if __name__ == "__main__":

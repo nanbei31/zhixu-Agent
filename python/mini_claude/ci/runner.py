@@ -108,6 +108,13 @@ def run_test_command(command: str, cwd: Path, timeout_seconds: float) -> Command
     """Run a user-supplied CI command and capture a deterministic result."""
     resolved_cwd = cwd.resolve()
     started = time.monotonic()
+    test_env = {
+        key: value for key, value in os.environ.items()
+        if key not in SENSITIVE_TEST_ENV_NAMES
+    }
+    # A same-size repair written within the source file's timestamp resolution can
+    # otherwise reuse bytecode produced by the initial failing test.
+    test_env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         completed = subprocess.run(
             command,
@@ -117,10 +124,7 @@ def run_test_command(command: str, cwd: Path, timeout_seconds: float) -> Command
             text=True,
             encoding="utf-8",
             errors="replace",
-            env={
-                key: value for key, value in os.environ.items()
-                if key not in SENSITIVE_TEST_ENV_NAMES
-            },
+            env=test_env,
             timeout=timeout_seconds,
         )
         return CommandResult(
