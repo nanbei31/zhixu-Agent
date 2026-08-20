@@ -196,6 +196,10 @@ class Agent:
         is_sub_agent: bool = False,
         workspace_policy: WorkspacePolicy | None = None,
         enable_mcp: bool = True,
+        working_directory: Path | None = None,
+        event_sink: Callable[[str, dict[str, Any]], None] | None = None,
+        quiet: bool = False,
+        enable_memory: bool = True,
     ):
         self.permission_mode = permission_mode
         self.thinking = thinking
@@ -204,6 +208,14 @@ class Agent:
         self.is_sub_agent = is_sub_agent
         self.workspace_policy = workspace_policy
         self.enable_mcp = enable_mcp
+        self.working_directory = (
+            workspace_policy.working_directory
+            if workspace_policy is not None
+            else (working_directory or Path.cwd()).resolve()
+        )
+        self.event_sink = event_sink
+        self.quiet = quiet
+        self.enable_memory = enable_memory
         self.tools = custom_tools if custom_tools is not None else tool_definitions
         self._skill_allowed_tools: frozenset[str] | None = None
         self.max_cost_usd = max_cost_usd
@@ -287,8 +299,13 @@ class Agent:
             self._dynamic_system_context = ""
         else:
             self._static_system_prompt = build_static_system_prompt()
-            self._dynamic_system_context = build_dynamic_system_context()
-            self._user_context_reminder = build_user_context_reminder()
+            self._dynamic_system_context = build_dynamic_system_context(
+                self.working_directory,
+                include_memory=self.enable_memory,
+            )
+            self._user_context_reminder = build_user_context_reminder(
+                self.working_directory
+            )
         self._base_system_prompt = (
             self._static_system_prompt + "\n\n" + self._dynamic_system_context
             if self._dynamic_system_context else self._static_system_prompt
@@ -464,6 +481,24 @@ class Agent:
     # ─── Main entry point ────────────────────────────────────
 
     async def chat(self, user_message: str) -> None:
+        chat_started = time.perf_counter()
+        history_size = (
+            len(getattr(self, "_openai_messages", [])) if self.use_openai
+            else len(getattr(self, "_anthropic_messages", []))
+        )
+        self._emit_event(
+            "conversation_loaded",
+            provider="openai-compatible" if self.use_openai else "anthropic",
+            model=getattr(self, "model", "unknown"),
+            message_count=history_size,
+        )
+        self._emit_event(
+            "context_loaded",
+            working_directory=str(getattr(self, "working_directory", Path.cwd())),
+            tool_count=len(getattr(self, "tools", [])),
+            memory_enabled=getattr(self, "enable_memory", True),
+            context_window=getattr(self, "effective_window", 180000) + 20000,
+        )
         # Lazily connect to MCP servers on first chat (main agent only)
         if self.enable_mcp and not self._mcp_initialized and not self.is_sub_agent:
             self._mcp_initialized = True
@@ -479,14 +514,31 @@ class Agent:
         coro = self._chat_openai(user_message) if self.use_openai else self._chat_anthropic(user_message)
         self._current_task = asyncio.current_task()
         try:
+            self._emit_event("model_request_started", input_preview=user_message[:240])
             await coro
         except asyncio.CancelledError:
             self._aborted = True
+            self._emit_event("task_aborted")
+        except Exception as exc:
+            self._emit_event(
+                "task_failed",
+                error=str(exc),
+                duration_ms=round((time.perf_counter() - chat_started) * 1000, 2),
+            )
+            raise
         finally:
             self._current_task = None
             self._skill_allowed_tools = None
-        if not self.is_sub_agent:
+        if getattr(self, "event_sink", None) is not None:
+            self._emit_event(
+                "task_completed",
+                aborted=self._aborted,
+                duration_ms=round((time.perf_counter() - chat_started) * 1000, 2),
+                usage=self.get_usage_metrics(),
+            )
+        if not self.is_sub_agent and not getattr(self, "quiet", False):
             print_divider()
+        if not self.is_sub_agent:
             self._auto_save()
 
     # ─── Sub-agent entry point ────────────────────────────────
@@ -510,7 +562,9 @@ class Agent:
         """Invoke a user-selected Skill with its runtime tool allowlist."""
         from .skills import execute_skill
 
-        result = execute_skill(skill_name, args)
+        result = execute_skill(
+            skill_name, args, getattr(self, "working_directory", None)
+        )
         if not result:
             raise ValueError(f"Unknown skill: {skill_name}")
         if result["context"] == "fork":
@@ -529,10 +583,24 @@ class Agent:
     # ─── Output helper ────────────────────────────────────────
 
     def _emit_text(self, text: str) -> None:
+        self._emit_event("assistant_delta", text=text)
         if self._output_buffer is not None:
             self._output_buffer.append(text)
-        else:
+        elif not self.quiet:
             print_assistant_text(text)
+
+    def _emit_event(self, event_type: str, **data: Any) -> None:
+        if getattr(self, "event_sink", None) is None:
+            return
+        try:
+            self.event_sink(event_type, data)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _trace_preview(value: Any, limit: int = 800) -> str:
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+        return text if len(text) <= limit else text[:limit] + "..."
 
     # ─── REPL commands ────────────────────────────────────────
 
@@ -992,7 +1060,7 @@ class Agent:
                 "metadata": {
                     "id": self.session_id,
                     "model": self.model,
-                    "cwd": str(Path.cwd()),
+                    "cwd": str(self.working_directory),
                     "startTime": self.session_start_time,
                     "messageCount": self._get_message_count(),
                 },
@@ -1006,7 +1074,13 @@ class Agent:
 
     async def _check_and_compact(self) -> None:
         if self.last_input_token_count > self.effective_window * 0.85:
-            print_info("Context window filling up, compacting conversation...")
+            self._emit_event(
+                "context_compaction_started",
+                token_count=self.last_input_token_count,
+                threshold=round(self.effective_window * 0.85),
+            )
+            if not self.quiet:
+                print_info("Context window filling up, compacting conversation...")
             await self._compact_conversation()
 
     async def _compact_conversation(self) -> None:
@@ -1014,7 +1088,12 @@ class Agent:
             await self._compact_openai()
         else:
             await self._compact_anthropic()
-        print_info("Conversation compacted.")
+        self._emit_event(
+            "context_compaction_completed",
+            message_count=self._get_message_count(),
+        )
+        if not self.quiet:
+            print_info("Conversation compacted.")
 
     async def _compact_anthropic(self) -> None:
         # Invariant: caller must ensure the last message is a plain user-text
@@ -1272,6 +1351,33 @@ class Agent:
             name, inp, self._read_file_state, self.workspace_policy
         )
 
+    async def _execute_tool_with_trace(self, name: str, inp: dict) -> str:
+        started = time.perf_counter()
+        self._emit_event(
+            "tool_call_started",
+            tool=name,
+            input_preview=self._trace_preview(inp),
+        )
+        try:
+            result = await self._execute_tool_call(name, inp)
+        except Exception as exc:
+            self._emit_event(
+                "tool_call_completed",
+                tool=name,
+                success=False,
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                result_preview=str(exc),
+            )
+            raise
+        self._emit_event(
+            "tool_call_completed",
+            tool=name,
+            success=not result.startswith(("Error:", "Action denied:")),
+            duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            result_preview=self._trace_preview(result),
+        )
+        return result
+
     def _runtime_tools(self) -> list[ToolDef]:
         if self._skill_allowed_tools is None:
             return self.tools
@@ -1284,7 +1390,11 @@ class Agent:
 
     async def _execute_skill_tool(self, inp: dict) -> str:
         from .skills import execute_skill
-        result = execute_skill(inp.get("skill_name", ""), inp.get("args", ""))
+        result = execute_skill(
+            inp.get("skill_name", ""),
+            inp.get("args", ""),
+            getattr(self, "working_directory", None),
+        )
         if not result:
             return f"Unknown skill: {inp.get('skill_name', '')}"
 
@@ -1309,6 +1419,10 @@ class Agent:
                 permission_mode=self._child_permission_mode(),
                 workspace_policy=self.workspace_policy,
                 enable_mcp=self.enable_mcp,
+                working_directory=self.working_directory,
+                event_sink=self.event_sink,
+                quiet=self.quiet,
+                enable_memory=self.enable_memory,
             )
             try:
                 sub_result = await sub_agent.run_once(inp.get("args") or "Execute this skill task.")
@@ -1459,6 +1573,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             permission_mode=self._child_permission_mode(),
             workspace_policy=self.workspace_policy,
             enable_mcp=self.enable_mcp,
+            working_directory=self.working_directory,
+            event_sink=self.event_sink,
+            quiet=self.quiet,
+            enable_memory=self.enable_memory,
         )
 
         try:
@@ -1511,7 +1629,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
         that settled after the last API call would otherwise be dropped —
         issue #7), then start a fresh prefetch for this query."""
         self._consume_memory_prefetch_if_ready(messages)
-        if self.is_sub_agent:
+        if self.is_sub_agent or not self.enable_memory:
             return
         if self._memory_prefetch and not self._memory_prefetch.settled:
             self._memory_prefetch.task.cancel()
@@ -1566,7 +1684,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             # Consume memory prefetch if settled (non-blocking poll, zero-wait)
             self._consume_memory_prefetch_if_ready(self._anthropic_messages)
 
-            if not self.is_sub_agent:
+            if not self.is_sub_agent and not self.quiet:
                 start_spinner()
 
             # ── Streaming tool execution ──────────────────────────────
@@ -1587,12 +1705,18 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                         self._plan_file_path, self.workspace_policy,
                     )
                     if perm["action"] == "allow":
-                        task = asyncio.create_task(self._execute_tool_call(block["name"], block["input"]))
+                        self._emit_event(
+                            "permission_decision",
+                            tool=block["name"],
+                            action="allow",
+                            reason="concurrency-safe fast path",
+                        )
+                        task = asyncio.create_task(self._execute_tool_with_trace(block["name"], block["input"]))
                         early_executions[block["id"]] = task
 
             response = await self._call_anthropic_stream(on_tool_block_complete=_on_tool_block)
 
-            if not self.is_sub_agent:
+            if not self.is_sub_agent and not self.quiet:
                 stop_spinner()
 
             self.last_api_call_time = time.time()
@@ -1613,6 +1737,17 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             )
 
             tool_uses = [b for b in response.content if b.type == "tool_use"]
+            self._emit_event(
+                "model_response_received",
+                tool_count=len(tool_uses),
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+            )
+            self._emit_event(
+                "agent_decision",
+                decision="use_tools" if tool_uses else "respond",
+                tools=[tool.name for tool in tool_uses],
+            )
 
             self._anthropic_messages.append({
                 "role": "assistant",
@@ -1620,7 +1755,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             })
 
             if not tool_uses:
-                if not self.is_sub_agent:
+                if not self.is_sub_agent and not self.quiet:
                     print_cost(self.total_input_tokens, self.total_output_tokens, self.total_cache_read_tokens, self.total_cache_creation_tokens)
                 break
 
@@ -1648,14 +1783,16 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                 if context_break or self._aborted:
                     break
                 inp = dict(tu.input) if hasattr(tu.input, 'items') else tu.input
-                print_tool_call(tu.name, inp)
+                if not self.quiet:
+                    print_tool_call(tu.name, inp)
 
                 # Was this tool already started during streaming?
                 early_task = early_executions.get(tu.id)
                 if early_task:
                     raw = await early_task
                     res = self._persist_large_result(tu.name, raw)
-                    print_tool_result(tu.name, res)
+                    if not self.quiet:
+                        print_tool_result(tu.name, res)
                     tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": res})
                     continue
 
@@ -1668,6 +1805,12 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                         tu.name, inp, self.permission_mode,
                         self._plan_file_path, self.workspace_policy,
                     )
+                self._emit_event(
+                    "permission_decision",
+                    tool=tu.name,
+                    action=perm["action"],
+                    reason=perm.get("message", ""),
+                )
                 if perm["action"] == "deny":
                     print_info(f"Denied: {perm.get('message', '')}")
                     tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": f"Action denied: {perm.get('message', '')}"})
@@ -1685,9 +1828,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                         if cacheable:
                             self._confirmed_paths.add(perm["message"])
 
-                raw = await self._execute_tool_call(tu.name, inp)
+                raw = await self._execute_tool_with_trace(tu.name, inp)
                 res = self._persist_large_result(tu.name, raw)
-                print_tool_result(tu.name, res)
+                if not self.quiet:
+                    print_tool_result(tu.name, res)
 
                 if self._context_cleared:
                     self._context_cleared = False
@@ -1809,12 +1953,12 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             # Consume memory prefetch if settled (non-blocking poll, zero-wait)
             self._consume_memory_prefetch_if_ready(self._openai_messages)
 
-            if not self.is_sub_agent:
+            if not self.is_sub_agent and not self.quiet:
                 start_spinner()
 
             response = await self._call_openai_stream()
 
-            if not self.is_sub_agent:
+            if not self.is_sub_agent and not self.quiet:
                 stop_spinner()
 
             self.last_api_call_time = time.time()
@@ -1843,8 +1987,21 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             self._openai_messages.append(message)
 
             tool_calls = message.get("tool_calls")
+            self._emit_event(
+                "model_response_received",
+                tool_count=len(tool_calls or []),
+                usage=response.get("usage") or {},
+            )
+            self._emit_event(
+                "agent_decision",
+                decision="use_tools" if tool_calls else "respond",
+                tools=[
+                    tc.get("function", {}).get("name", "unknown")
+                    for tc in (tool_calls or [])
+                ],
+            )
             if not tool_calls:
-                if not self.is_sub_agent:
+                if not self.is_sub_agent and not self.quiet:
                     print_cost(self.total_input_tokens, self.total_output_tokens, self.total_cache_read_tokens, self.total_cache_creation_tokens)
                 break
 
@@ -1876,7 +2033,8 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                 except Exception:
                     inp = {}
 
-                print_tool_call(fn_name, inp)
+                if not self.quiet:
+                    print_tool_call(fn_name, inp)
 
                 if self.permission_mode == "auto":
                     perm = await self._classify_tool_call(fn_name, inp)
@@ -1885,6 +2043,12 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                         fn_name, inp, self.permission_mode,
                         self._plan_file_path, self.workspace_policy,
                     )
+                self._emit_event(
+                    "permission_decision",
+                    tool=fn_name,
+                    action=perm["action"],
+                    reason=perm.get("message", ""),
+                )
                 if perm["action"] == "deny":
                     print_info(f"Denied: {perm.get('message', '')}")
                     oai_checked.append({"tc": tc, "fn": fn_name, "inp": inp, "allowed": False, "result": f"Action denied: {perm.get('message', '')}"})
@@ -1919,9 +2083,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
 
                 if batch["concurrent"]:
                     async def _run_oai_safe(ct_item: dict) -> tuple[dict, str]:
-                        raw = await self._execute_tool_call(ct_item["fn"], ct_item["inp"])
+                        raw = await self._execute_tool_with_trace(ct_item["fn"], ct_item["inp"])
                         res = self._persist_large_result(ct_item["fn"], raw)
-                        print_tool_result(ct_item["fn"], res)
+                        if not self.quiet:
+                            print_tool_result(ct_item["fn"], res)
                         return ct_item, res
 
                     results = await asyncio.gather(*[_run_oai_safe(ct) for ct in batch["items"]])
@@ -1932,9 +2097,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                         if not ct["allowed"]:
                             self._openai_messages.append({"role": "tool", "tool_call_id": ct["tc"]["id"], "content": ct["result"]})
                             continue
-                        raw = await self._execute_tool_call(ct["fn"], ct["inp"])
+                        raw = await self._execute_tool_with_trace(ct["fn"], ct["inp"])
                         res = self._persist_large_result(ct["fn"], raw)
-                        print_tool_result(ct["fn"], res)
+                        if not self.quiet:
+                            print_tool_result(ct["fn"], res)
 
                         if self._context_cleared:
                             self._context_cleared = False

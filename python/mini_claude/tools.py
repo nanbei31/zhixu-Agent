@@ -311,7 +311,10 @@ def _edit_file(inp: dict) -> str:
         return f"Error editing file: {e}"
 
 
-def _list_files(inp: dict) -> str:
+def _list_files(
+    inp: dict,
+    workspace_policy: WorkspacePolicy | None = None,
+) -> str:
     try:
         base = Path(inp.get("path") or ".")
         pattern = inp["pattern"]
@@ -319,6 +322,11 @@ def _list_files(inp: dict) -> str:
         extra = 0
         for p in base.glob(pattern):
             if p.is_file():
+                if (
+                    workspace_policy is not None
+                    and not workspace_policy.check_path(p, write=False).allowed
+                ):
+                    continue
                 rel = str(p.relative_to(base) if base != Path(".") else p)
                 # Skip node_modules / hidden components by exact path part —
                 # a substring test would also drop a file merely *named*
@@ -342,13 +350,16 @@ def _list_files(inp: dict) -> str:
         return f"Error listing files: {e}"
 
 
-def _grep_search(inp: dict) -> str:
+def _grep_search(
+    inp: dict,
+    workspace_policy: WorkspacePolicy | None = None,
+) -> str:
     pattern = inp["pattern"]
     path = inp.get("path") or "."
     include = inp.get("include")
 
     # Try system grep first (Linux/macOS)
-    if not IS_WIN:
+    if not IS_WIN and workspace_policy is None:
         try:
             args = ["grep", "--line-number", "--color=never", "-r"]
             if include:
@@ -370,10 +381,15 @@ def _grep_search(inp: dict) -> str:
             pass  # Fall through to Python fallback
 
     # Pure Python fallback (Windows, or system grep unavailable)
-    return _grep_python(pattern, path, include)
+    return _grep_python(pattern, path, include, workspace_policy)
 
 
-def _grep_python(pattern: str, directory: str, include: str | None) -> str:
+def _grep_python(
+    pattern: str,
+    directory: str,
+    include: str | None,
+    workspace_policy: WorkspacePolicy | None = None,
+) -> str:
     try:
         regex = re.compile(pattern)
     except re.error as e:
@@ -395,6 +411,11 @@ def _grep_python(pattern: str, directory: str, include: str | None) -> str:
             if name.startswith(".") or name == "node_modules":
                 continue
             full = os.path.join(d, name)
+            if (
+                workspace_policy is not None
+                and not workspace_policy.check_path(full, write=False).allowed
+            ):
+                continue
             if os.path.isdir(full):
                 walk(full)
                 continue
@@ -432,6 +453,7 @@ def _run_shell(inp: dict) -> str:
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            cwd=inp.get("_working_directory"),
         )
         output = result.stdout or ""
         if result.returncode != 0:
@@ -693,6 +715,12 @@ async def execute_tool(
         if not decision.allowed:
             path = f" ({decision.resolved_path})" if decision.resolved_path else ""
             return f"Error: Workspace policy denied {name}: {decision.reason}{path}"
+        inp = dict(inp)
+        if decision.resolved_path is not None:
+            key = "file_path" if "file_path" in inp else "path"
+            inp[key] = str(decision.resolved_path)
+        if name == "run_shell":
+            inp["_working_directory"] = str(workspace_policy.working_directory)
 
     # ─── read-before-edit + mtime freshness checks ───────────
     if name == "read_file":
@@ -735,11 +763,14 @@ async def execute_tool(
             indent=2,
         )
 
+    if name == "list_files":
+        return _list_files(inp, workspace_policy)
+    if name == "grep_search":
+        return _grep_search(inp, workspace_policy)
+
     handlers: dict = {
         "write_file": _write_file,
         "edit_file": _edit_file,
-        "list_files": _list_files,
-        "grep_search": _grep_search,
         "run_shell": _run_shell,
         "web_fetch": _web_fetch,
     }

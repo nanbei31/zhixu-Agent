@@ -153,10 +153,11 @@ def _load_rules_dir(directory: Path) -> str:
         return ""
 
 
-def load_claude_md() -> str:
+def load_claude_md(start: Path | None = None) -> str:
     """Walk up from cwd collecting all CLAUDE.md files, resolving @includes."""
     parts: list[str] = []
-    d = Path.cwd().resolve()
+    start_dir = (start or Path.cwd()).resolve()
+    d = start_dir
     while True:
         f = d / "CLAUDE.md"
         if f.is_file():
@@ -171,17 +172,22 @@ def load_claude_md() -> str:
             break
         d = parent
     # Load .claude/rules/*.md from cwd
-    rules = _load_rules_dir(Path.cwd())
+    rules = _load_rules_dir(start_dir)
     claude_md = ""
     if parts:
         claude_md = "\n\n# Project Instructions (CLAUDE.md)\n" + "\n\n---\n\n".join(parts)
     return claude_md + rules
 
 
-def get_git_context() -> str:
+def get_git_context(working_directory: Path | None = None) -> str:
     """Get git branch, recent commits, and status."""
     try:
-        opts = {"encoding": "utf-8", "timeout": 3, "capture_output": True}
+        opts = {
+            "encoding": "utf-8",
+            "timeout": 3,
+            "capture_output": True,
+            "cwd": str((working_directory or Path.cwd()).resolve()),
+        }
         branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], **opts).stdout.strip()
         log = subprocess.run(["git", "log", "--oneline", "-5"], **opts).stdout.strip()
         status = subprocess.run(["git", "status", "--short"], **opts).stdout.strip()
@@ -213,14 +219,19 @@ def build_static_system_prompt() -> str:
     return SYSTEM_PROMPT_TEMPLATE
 
 
-def build_dynamic_system_context() -> str:
+def build_dynamic_system_context(
+    working_directory: Path | None = None,
+    *,
+    include_memory: bool = True,
+) -> str:
     """Per-session context: stable within a session but varies by
     machine/project, so it stays uncached. Kept OUT of the static block."""
     plat = f"{platform.system()} {platform.machine()}"
     shell = (os.environ.get("ComSpec") or "cmd.exe") if sys.platform == "win32" else os.environ.get("SHELL", "/bin/sh")
-    git_context = get_git_context()
-    memory_section = build_memory_prompt_section()
-    skills_section = build_skill_descriptions()
+    cwd = (working_directory or Path.cwd()).resolve()
+    git_context = get_git_context(cwd)
+    memory_section = build_memory_prompt_section() if include_memory else ""
+    skills_section = build_skill_descriptions(cwd)
     agent_section = build_agent_descriptions()
 
     deferred_names = get_deferred_tool_names()
@@ -231,21 +242,21 @@ def build_dynamic_system_context() -> str:
 
     return (
         f"# Environment\n"
-        f"Working directory: {Path.cwd()}\n"
+        f"Working directory: {cwd}\n"
         f"Platform: {plat}\n"
         f"Shell: {shell}"
         f"{git_context}{memory_section}{skills_section}{agent_section}{deferred_section}"
     )
 
 
-def build_user_context_reminder() -> str:
+def build_user_context_reminder(working_directory: Path | None = None) -> str:
     """CLAUDE.md + date, wrapped in <system-reminder>. Project-specific content
     here would fragment the system prompt cache, so it must stay out of the
     cached static block. Like Claude Code's prependUserContext, the agent
     injects this into the first user message of the conversation."""
     from datetime import date
     today = date.today().isoformat()
-    claude_md = load_claude_md()
+    claude_md = load_claude_md(working_directory)
     claude_md_section = f"\n{claude_md}\n" if claude_md else ""
     return (
         "<system-reminder>\n"
@@ -258,9 +269,12 @@ def build_user_context_reminder() -> str:
     )
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(working_directory: Path | None = None) -> str:
     """Combined static + dynamic prompt as a single string. Used by the
     OpenAI-compatible backend (which relies on the provider's automatic prefix
     caching) and as a fallback; the Anthropic backend uses the split blocks
     above so it can place its own cache_control breakpoint."""
-    return f"{build_static_system_prompt()}\n\n{build_dynamic_system_context()}"
+    return (
+        f"{build_static_system_prompt()}\n\n"
+        f"{build_dynamic_system_context(working_directory)}"
+    )

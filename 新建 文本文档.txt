@@ -1,0 +1,7 @@
+--target、--allowed-path 和敏感路径拦截。
+Git Worktree 隔离与失败回滚。
+pytest、Ruff、mypy 多检查器。
+pytest-repair 等 Skills。
+报告增加 Diff、Token、总耗时和费用。
+建立 20～50 个故障 Benchmark。
+GitHub Actions 自动修复与 PR。

@@ -1,5 +1,19 @@
 # Mini Claude Code — Python 版
 
+## 本地 Web 工作台
+
+安装项目依赖后，可启动带文件树、对话、源码编辑、Diff 和实时执行轨迹的本地页面：
+
+```powershell
+mini-claude-py --web
+```
+
+默认打开 `http://127.0.0.1:8765`。日常修复请使用页面右上角的“选择本地项目”（Windows 原生目录选择框）或“输入路径”：它们会直接挂载源代码目录，Agent 发送任务后的文件修改会写回该目录；“撤销上次修改”会恢复到该次任务发送前的源代码状态。
+
+“临时导入文件/文件夹”仅用于查看或试验，浏览器出于安全限制不会提供原始绝对路径，因此它创建的是临时副本，修改不会回写原项目。Agent 的读取和修改被限制在所选工作区；终端工具默认关闭，开启后危险命令仍会弹出确认。
+
+执行轨迹来自真实 Agent 循环，包括对话加载、上下文加载、任务分类、模型请求、Agent 决策、权限判定、工具调用与返回、Token 和费用。可用 `--web-host`、`--web-port` 与 `--no-open-browser` 调整启动方式。
+
 与 TypeScript 版功能 99% 一致的 Python 实现。**需要 Python >= 3.11**。
 
 > 📖 完整教程文档见 [claude-code-from-scratch](https://github.com/Windy3f3f3f3f/claude-code-from-scratch)（文档中所有代码块均支持 TypeScript / Python 切换）

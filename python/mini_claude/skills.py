@@ -82,9 +82,9 @@ def _directory_signature(path: Path | None) -> tuple[tuple[str, int, int], ...]:
     return tuple(signature)
 
 
-def discover_skills() -> list[SkillDefinition]:
+def discover_skills(start: Path | None = None) -> list[SkillDefinition]:
     user_dir = Path.home() / ".claude" / "skills"
-    project_dir = _find_project_skills_dir(Path.cwd())
+    project_dir = _find_project_skills_dir(start or Path.cwd())
     cache_key = (
         str(user_dir.resolve()),
         str(project_dir.resolve()) if project_dir else "",
@@ -226,8 +226,8 @@ def _parse_skill_file(file_path: Path, source: str, skill_dir: str) -> SkillDefi
     )
 
 
-def get_skill_by_name(name: str) -> SkillDefinition | None:
-    return next((skill for skill in discover_skills() if skill.name == name), None)
+def get_skill_by_name(name: str, start: Path | None = None) -> SkillDefinition | None:
+    return next((skill for skill in discover_skills(start) if skill.name == name), None)
 
 
 def resolve_skill_prompt(skill: SkillDefinition, args: str) -> str:
@@ -239,8 +239,10 @@ def resolve_skill_prompt(skill: SkillDefinition, args: str) -> str:
     return prompt.replace("${CLAUDE_SKILL_DIR}", skill.skill_dir)
 
 
-def execute_skill(skill_name: str, args: str) -> dict[str, Any] | None:
-    skill = get_skill_by_name(skill_name)
+def execute_skill(
+    skill_name: str, args: str, start: Path | None = None
+) -> dict[str, Any] | None:
+    skill = get_skill_by_name(skill_name, start)
     if not skill:
         return None
     return {
@@ -250,8 +252,8 @@ def execute_skill(skill_name: str, args: str) -> dict[str, Any] | None:
     }
 
 
-def build_skill_descriptions() -> str:
-    skills = discover_skills()
+def build_skill_descriptions(start: Path | None = None) -> str:
+    skills = discover_skills(start)
     if not skills:
         return ""
 

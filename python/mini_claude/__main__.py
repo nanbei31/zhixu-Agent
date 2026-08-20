@@ -93,6 +93,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", action="store_true", help="Resume last session")
     parser.add_argument("--max-cost", type=float, default=None, help="Max USD spend")
     parser.add_argument("--max-turns", type=int, default=None, help="Max agentic turns")
+    parser.add_argument("--web", action="store_true", help="Start the local Web workbench")
+    parser.add_argument("--web-host", default="127.0.0.1", help="Web server host (default: 127.0.0.1)")
+    parser.add_argument("--web-port", type=int, default=8765, help="Web server port (default: 8765)")
+    parser.add_argument("--no-open-browser", action="store_true", help="Do not open the Web workbench automatically")
     parser.add_argument("--fix-ci", action="store_true", help="Run tests and repair pytest failures")
     parser.add_argument("--benchmark", action="store_true", help="Run the pytest repair benchmark")
     parser.add_argument("--benchmark-suite", help="Path to a benchmark suite YAML file")
@@ -179,11 +183,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--help", "-h", action="store_true", help="Show help")
     args = parser.parse_args()
     if sum(bool(value) for value in (
-        args.fix_ci, args.benchmark, args.pybughive, args.bugsinpy,
+        args.web, args.fix_ci, args.benchmark, args.pybughive, args.bugsinpy,
     )) > 1:
         parser.error(
-            "--fix-ci, --benchmark, --pybughive, and --bugsinpy are mutually exclusive"
+            "--web, --fix-ci, --benchmark, --pybughive, and --bugsinpy are mutually exclusive"
         )
+    if args.web and args.prompt:
+        parser.error("--web does not accept a positional prompt")
+    if args.web_port < 1 or args.web_port > 65535:
+        parser.error("--web-port must be between 1 and 65535")
     if args.fix_ci and args.prompt:
         parser.error("--fix-ci does not accept a positional prompt")
     if args.benchmark and args.prompt:
@@ -479,6 +487,10 @@ Options:
   --resume            Resume the last session
   --max-cost USD      Stop when estimated cost exceeds this amount
   --max-turns N       Stop after N agentic turns
+  --web               Start the local three-panel Web workbench
+  --web-host HOST     Bind host (default: 127.0.0.1)
+  --web-port PORT     Bind port (default: 8765)
+  --no-open-browser   Do not open a browser automatically
   --fix-ci             Run a test command and repair pytest failures
   --benchmark          Run the 40-case pytest repair benchmark
   --benchmark-case ID  Select a benchmark case (repeatable)
@@ -594,6 +606,15 @@ Examples:
     if not resolved_api_key and api_base:
         resolved_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
         resolved_use_openai = True
+
+    if args.web:
+        from .web import run_web
+        run_web(
+            args.web_host,
+            args.web_port,
+            open_browser=not args.no_open_browser,
+        )
+        return
 
     if args.benchmark and args.benchmark_validate:
         try:

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>智修 Agent</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">Z</span>
+      <div><strong>智修 Agent</strong><small>Local coding workbench</small></div>
+    </div>
+    <div class="workspace-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="workspaceLabel">请选择工作区</span>
+      <span class="workspace-mode" id="workspaceMode">未挂载</span>
+      <span class="model-chip" id="modelLabel">检查模型配置</span>
+    </div>
+    <div class="top-actions">
+      <button class="icon-button" id="refreshButton" title="刷新文件与 Diff" disabled><i data-lucide="refresh-cw"></i></button>
+      <button class="button secondary" id="importFilesButton" title="仅创建临时副本，不会回写源文件"><i data-lucide="files"></i>临时导入文件</button>
+      <button class="button secondary" id="importButton" title="仅创建临时副本，不会回写源文件"><i data-lucide="folder-up"></i>临时导入文件夹</button>
+      <button class="button secondary" id="openButton"><i data-lucide="keyboard"></i>输入路径</button>
+      <button class="button primary" id="pickSourceButton" title="直接挂载源代码，修改会写回本机文件"><i data-lucide="folder-open"></i>选择本地项目</button>
+      <input id="filesInput" type="file" multiple hidden>
+      <input id="folderInput" type="file" webkitdirectory multiple hidden>
+    </div>
+  </header>
+
+  <nav class="mobile-nav" aria-label="工作台视图">
+    <button data-mobile-view="files"><i data-lucide="files"></i>文件</button>
+    <button class="active" data-mobile-view="work"><i data-lucide="message-square"></i>工作区</button>
+    <button data-mobile-view="trace"><i data-lucide="activity"></i>轨迹</button>
+  </nav>
+
+  <main class="workbench">
+    <aside class="files-panel panel" data-panel="files">
+      <div class="panel-heading">
+        <div><span class="eyebrow">WORKSPACE</span><h2>项目文件</h2></div>
+        <span class="count" id="fileCount">0</span>
+      </div>
+      <div class="search-wrap"><i data-lucide="search"></i><input id="fileSearch" placeholder="筛选文件" disabled></div>
+      <div class="file-actions">
+        <button class="button compact" id="selectFilesButton" disabled><i data-lucide="list-checks"></i><span>选择</span></button>
+        <button class="button compact danger-text" id="deleteSelectedButton" hidden disabled><i data-lucide="list-x"></i><span>移除所选</span></button>
+        <button class="icon-button danger" id="clearAllButton" title="清空文件列表" disabled><i data-lucide="eraser"></i></button>
+      </div>
+      <div class="workspace-path" id="workspacePath">打开目录后，Agent 只能在该范围内读写。</div>
+      <div class="file-tree empty" id="fileTree">暂无文件</div>
+      <div class="shell-setting">
+        <label class="switch-row">
+          <span><strong>允许终端工具</strong><small>危险命令仍需确认</small></span>
+          <input type="checkbox" id="shellToggle"><span class="switch"></span>
+        </label>
+      </div>
+    </aside>
+
+    <section class="main-panel panel" data-panel="work">
+      <div class="view-tabs" role="tablist">
+        <button class="active" data-view="chat"><i data-lucide="message-square"></i>对话</button>
+        <button data-view="editor"><i data-lucide="file-code-2"></i>文件 <span id="editorDirty"></span></button>
+        <button data-view="diff"><i data-lucide="git-compare-arrows"></i>Diff <span class="tab-count" id="diffCount">0</span></button>
+        <button class="undo-action" id="undoButton" disabled title="恢复到上次发送任务前"><i data-lucide="undo-2"></i>撤销上次修改</button>
+      </div>
+
+      <div class="view active" id="chatView">
+        <div class="messages" id="messages">
+          <div class="welcome-state">
+            <div class="welcome-icon"><i data-lucide="terminal-square"></i></div>
+            <h1>选择本地项目</h1>
+            <p>选择本地项目后，Agent 的修改会直接写回源代码；不满意可撤销上次任务。</p>
+          </div>
+        </div>
+        <div class="composer">
+          <textarea id="messageInput" rows="3" placeholder="例如：分析登录接口的报错并做最小修复" disabled></textarea>
+          <div class="composer-footer">
+            <span id="composerHint">先打开工作区</span>
+            <div>
+              <button class="icon-button danger" id="stopButton" title="停止任务" hidden><i data-lucide="square"></i></button>
+              <button class="button primary" id="sendButton" disabled><i data-lucide="send"></i>发送</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="editorView">
+        <div class="editor-toolbar">
+          <div><i data-lucide="file-code-2"></i><span id="editorPath">未选择文件</span></div>
+          <button class="button secondary" id="saveButton" disabled><i data-lucide="save"></i>保存</button>
+        </div>
+        <textarea class="code-editor" id="codeEditor" spellcheck="false" disabled></textarea>
+      </div>
+
+      <div class="view" id="diffView">
+        <div class="diff-summary" id="diffSummary">当前没有修改</div>
+        <pre class="diff-output" id="diffOutput">打开工作区后可查看相对初始状态的修改。</pre>
+      </div>
+    </section>
+
+    <aside class="trace-panel panel" data-panel="trace">
+      <div class="panel-heading">
+        <div><span class="eyebrow">LIVE TRACE</span><h2>执行轨迹</h2></div>
+        <button class="icon-button" id="clearTraceButton" title="清空轨迹"><i data-lucide="trash-2"></i></button>
+      </div>
+      <div class="trace-filters" id="traceFilters">
+        <button class="active" data-filter="all">全部</button>
+        <button data-filter="decision">决策</button>
+        <button data-filter="tool">工具</button>
+        <button data-filter="usage">用量</button>
+      </div>
+      <div class="trace-list empty" id="traceList">
+        <div class="trace-placeholder"><i data-lucide="activity"></i><p>开始任务后，这里会显示真实的 Agent 执行事件。</p></div>
+      </div>
+    </aside>
+  </main>
+
+  <dialog id="pathDialog">
+    <form method="dialog" class="dialog-content" id="pathForm">
+      <div class="dialog-heading"><div><span class="eyebrow">LOCAL PATH</span><h2>挂载本地目录</h2></div><button class="icon-button" id="closePathDialog" type="button" title="关闭"><i data-lucide="x"></i></button></div>
+      <p>输入运行本服务的电脑上的绝对目录。目录不会上传到外部服务器。</p>
+      <label>目录路径<input id="pathInput" placeholder="D:\Learning-AI\my-project" autocomplete="off"></label>
+      <div class="dialog-actions"><button class="button secondary" id="cancelPathButton" type="button">取消</button><button class="button primary" id="pathSubmit" type="submit"><i data-lucide="folder-open"></i>挂载</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="confirmDialog">
+    <div class="dialog-content">
+      <div class="dialog-heading"><div><span class="eyebrow warning">CONFIRM</span><h2>需要你的确认</h2></div></div>
+      <pre id="confirmMessage"></pre>
+      <div class="dialog-actions"><button class="button secondary" id="denyButton">拒绝</button><button class="button danger-fill" id="approveButton">允许执行</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="deleteDialog">
+    <div class="dialog-content">
+      <div class="dialog-heading"><div><span class="eyebrow warning">WORKSPACE ACCESS</span><h2 id="deleteTitle">移除文件</h2></div><button class="icon-button" id="closeDeleteDialog" type="button" title="关闭"><i data-lucide="x"></i></button></div>
+      <p id="deleteMessage"></p>
+      <label id="clearConfirmationGroup" hidden>输入工作区名称 <strong id="clearConfirmationName"></strong> 以确认
+        <input id="clearConfirmationInput" autocomplete="off">
+      </label>
+      <div class="dialog-actions"><button class="button secondary" id="cancelDeleteButton" type="button">取消</button><button class="button danger-fill" id="confirmDeleteButton" type="button">确认移除</button></div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+</body>
+</html>
